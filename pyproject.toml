@@ -4,7 +4,12 @@ version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.13"
-dependencies = [
-    "fastapi>=0.116.1",
-    "uvicorn>=0.35.0",
+dependencies = []
+
+[project.optional-dependencies]
+host = [
+    "aiosqlite>=0.21.0",
+]
+client = [
+    "nanoid>=2.0.0",
 ]
