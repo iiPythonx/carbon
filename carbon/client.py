@@ -7,19 +7,9 @@ import socket
 import struct
 import typing
 import logging
-from enum import Enum
 
 from nanoid import generate
-
-# Initialization
-class Transaction(Enum):
-    PING = 0
-    WRIT = 1
-    READ = 2
-    WIPE = 3
-    AUTH = 4
-
-logging.basicConfig(level = logging.DEBUG)
+from carbon.typing import Transaction
 
 # Exceptions
 class NoAvailableNodes(Exception):
