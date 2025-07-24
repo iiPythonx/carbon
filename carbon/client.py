@@ -25,6 +25,35 @@ logging.basicConfig(level = logging.DEBUG)
 class NoAvailableNodes(Exception):
     pass
 
+# Sandboxing
+class Sandbox:
+    """A sandbox representing the state of a collection in the database."""
+    
+    def __init__(self, database, name: str, initial_value: dict[str, typing.Any] = {}) -> None:
+        self._db = database
+        self._name: str = name
+        self._value: dict[str, typing.Any] = initial_value
+
+    def __getattribute__(self, name: str) -> typing.Any:
+        if name in ["_db", "_name", "_value", "save"]:
+            return object.__getattribute__(self, name)
+
+        return self._value.get(name)
+
+    def __setattr__(self, name: str, value: typing.Any) -> None:
+        if name in ["_db", "_name", "_value"]:
+            return object.__setattr__(self, name, value)
+
+        self._value[name] = value
+
+    def __delattr__(self, name: str) -> None:
+        del self._value[name]
+
+    def save(self) -> None:
+        """Take all changes in this sandbox and propagate them to the database."""
+        logging.debug(f"Sandbox '{self._name}' is now propagating changes to the database!")
+        self._db.write(self._name, self._value)
+
 # Main object
 class CarbonDB:
     def __init__(self, hosts: list[str], authentication: typing.Optional[str] = None) -> None:
@@ -38,6 +67,7 @@ class CarbonDB:
 
     # Handle host selection
     def select_host(self) -> None:
+        """Automatically selects a backend database based on its latency."""
         open_sockets = []
         for host in self.hosts:
             start = time.time()
@@ -71,6 +101,7 @@ class CarbonDB:
     # Handle transactions
     @staticmethod
     def build_transaction(type: Transaction, key: str, value: typing.Optional[typing.Any] = None) -> bytes:
+        """Build a transaction based on its type and associated data."""
         value = json.dumps(value).encode("utf-8") if value is not None else b""
         return struct.pack(
             ">21sBII",
@@ -81,6 +112,7 @@ class CarbonDB:
         ) + key.encode("ascii") + value
 
     def transact(self, type: Transaction, key: str, value: typing.Optional[typing.Any] = None) -> tuple[int, bytes]:
+        """Build and transmit a transaction to the current backend database."""
         if self.active_connection is None:
             raise NoAvailableNodes
 
@@ -92,22 +124,27 @@ class CarbonDB:
         result, packet_size = struct.unpack(">BI", self.active_connection.recv(5))
         return result, self.active_connection.recv(packet_size)
 
-    def initialize(self, entries: dict[str, typing.Any]) -> None:
-        for key, value in entries.items():
-            current_value = self.read(key)
-            if current_value is not None:
-                continue
-
-            self.write(key, value)
-
     def write(self, key: str, value: typing.Any) -> None:
+        """Write the specified key and its associated value to the database. The value can be anything, as long as it is JSON serializable."""
         self.transact(Transaction.WRIT, key, value)
 
     def read(self, key: str) -> typing.Any:
+        """Read the value of the specified key from the database."""
         return json.loads(self.transact(Transaction.READ, key)[1].decode("utf-8"))
 
     def delete(self, key: str) -> None:
+        """Remove the specified key from the database."""
         self.transact(Transaction.WIPE, key)
 
     def auth(self, password: str) -> None:
+        """Authenticate with the current backend database."""
         self.transact(Transaction.AUTH, "PSW", password)
+
+    # Handle sandboxing
+    def sandbox(self, collection: str) -> Sandbox:
+        """Start a new sandbox, this is how you make bulk changes to the database."""
+        return Sandbox(
+            self,
+            collection,
+            self.read(collection) or {}
+        )
