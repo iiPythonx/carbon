@@ -48,7 +48,7 @@ class CarbonDB:
 
             # Send ping and record time
             connection.sendall(self.build_transaction(Transaction.PING, "TIME"))
-            if connection.recv(4) != b"HELO":
+            if struct.unpack(">BI", connection.recv(5))[0] != 0:
                 logging.debug(f"[ACK] The specified host '{host}' did not respond with HELO, skipping it.")
                 continue
 
@@ -60,7 +60,6 @@ class CarbonDB:
 
         open_sockets.sort(key = lambda _: _[1])
         for connection, _ in open_sockets[1:]:
-            print("killed", connection)
             connection.close()  # Kill off the slower nodes
 
         connection, latency = open_sockets[0]
@@ -81,17 +80,34 @@ class CarbonDB:
             len(value),
         ) + key.encode("ascii") + value
 
-    def transact(self, type: Transaction, key: str, value: typing.Optional[typing.Any] = None) -> None:
+    def transact(self, type: Transaction, key: str, value: typing.Optional[typing.Any] = None) -> tuple[int, bytes]:
         if self.active_connection is None:
             raise NoAvailableNodes
 
         packet = self.build_transaction(type, key, value)
         logging.debug(f"Sending packet to node: {packet}")
         self.active_connection.sendall(packet)
-        print(self.active_connection.recv(4))
+
+        # Receive result as well as the packet size
+        result, packet_size = struct.unpack(">BI", self.active_connection.recv(5))
+        return result, self.active_connection.recv(packet_size)
+
+    def initialize(self, entries: dict[str, typing.Any]) -> None:
+        for key, value in entries.items():
+            current_value = self.read(key)
+            if current_value is not None:
+                continue
+
+            self.write(key, value)
 
     def write(self, key: str, value: typing.Any) -> None:
         self.transact(Transaction.WRIT, key, value)
 
-    def read(self, key: str) -> None:
-        self.transact(Transaction.READ, key)
+    def read(self, key: str) -> typing.Any:
+        return json.loads(self.transact(Transaction.READ, key)[1].decode("utf-8"))
+
+    def delete(self, key: str) -> None:
+        self.transact(Transaction.WIPE, key)
+
+    def auth(self, password: str) -> None:
+        self.transact(Transaction.AUTH, "PSW", password)
