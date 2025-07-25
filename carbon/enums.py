@@ -15,3 +15,4 @@ class Transaction(Enum):
     READ = 2
     WIPE = 3
     AUTH = 4
+    PEER = 5

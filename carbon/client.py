@@ -9,7 +9,7 @@ import typing
 import logging
 
 from nanoid import generate
-from carbon.typing import Transaction
+from carbon.enums import Transaction
 
 # Exceptions
 class NoAvailableNodes(Exception):
@@ -63,8 +63,13 @@ class CarbonDB:
             start = time.time()
 
             # Setup socket connection
-            connection = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            connection.connect((host, 13051))
+            try:
+                connection = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                connection.connect((host.split(":")[0], int(host.split(":")[1]) if ":" in host else 13051))
+
+            except ConnectionError:
+                logging.debug(f"[ACK] The specified host '{host}' is unreachable.")
+                continue
 
             # Send ping and record time
             connection.sendall(self.build_transaction(Transaction.PING, "TIME"))
@@ -72,27 +77,33 @@ class CarbonDB:
                 logging.debug(f"[ACK] The specified host '{host}' did not respond with HELO, skipping it.")
                 continue
 
-            open_sockets.append((connection, time.time() - start))
+            open_sockets.append((connection, time.time() - start, host))
             logging.debug(f"[ACK] Host '{host}' is up and response latency was {round(open_sockets[-1][1] * 1000, 2)}ms.")
 
         if not open_sockets:
             raise NoAvailableNodes
 
         open_sockets.sort(key = lambda _: _[1])
-        for connection, _ in open_sockets[1:]:
+        for connection, *_ in open_sockets[1:]:
             connection.close()  # Kill off the slower nodes
 
-        connection, latency = open_sockets[0]
+        connection, latency, current_host = open_sockets[0]
         logging.debug(f"[ACK] Host selected with latency {round(latency * 1000, 2)}ms.")
 
         self.active_connection = connection
         del open_sockets
 
+        # Transmit the peer list
+        if len(self.hosts) > 1:
+            self.transact(Transaction.PEER, "LIST", "/".join(host for host in self.hosts if host != current_host))
+
     # Handle transactions
     @staticmethod
     def build_transaction(type: Transaction, key: str, value: typing.Optional[typing.Any] = None) -> bytes:
         """Build a transaction based on its type and associated data."""
-        value = json.dumps(value).encode("utf-8") if value is not None else b""
+        if not isinstance(value, bytes):
+            value = json.dumps(value).encode("utf-8") if value is not None else b""
+
         return struct.pack(
             ">21sBII",
             generate().encode("ascii"),
