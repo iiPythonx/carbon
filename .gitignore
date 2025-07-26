@@ -3,3 +3,5 @@ __pycache__/
 /*.py
 *.db
 *.db-journal
+build/
+*.egg-info

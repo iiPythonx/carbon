@@ -46,7 +46,7 @@ class Carbon:
         ) + data.encode("ascii")
 
     async def init(self) -> None:
-        self.db = await aiosqlite.connect("carbon2.db")
+        self.db = await aiosqlite.connect("carbon.db")
         await self.db.execute("""\
             CREATE TABLE IF NOT EXISTS items (
                 key   STRING,
