@@ -105,7 +105,7 @@ class CarbonDB:
             value = json.dumps(value).encode("utf-8") if value is not None else b""
 
         return struct.pack(
-            ">21sBII",
+            ">21sBBI",
             generate().encode("ascii"),
             type.value,
             len(key),

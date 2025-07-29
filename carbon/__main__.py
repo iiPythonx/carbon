@@ -49,10 +49,11 @@ class Carbon:
         self.db = await aiosqlite.connect("carbon.db")
         await self.db.execute("""\
             CREATE TABLE IF NOT EXISTS items (
-                key   STRING,
+                key   STRING PRIMARY KEY,
                 value STRING
             )
         """)
+        await self.db.execute("CREATE UNIQUE INDEX IF NOT EXISTS key_index ON items (key)")
 
     async def handle(self, read_stream: asyncio.StreamReader, write_stream: asyncio.StreamWriter) -> None:
         if self.db is None:
@@ -65,7 +66,7 @@ class Carbon:
         self.logging.add_connection("established", address)
 
         while read_stream:
-            payload = await read_stream.read(30)
+            payload = await read_stream.read(27)
             if not payload:
                 break
 
@@ -77,7 +78,7 @@ class Carbon:
                 transaction_type,
                 key_length,
                 value_length
-            ) = struct.unpack(">21sBII", payload)
+            ) = struct.unpack(">21sBBI", payload)
 
             key = (await read_stream.read(key_length)).decode("utf-8")
             value = (await read_stream.read(value_length)).decode("utf-8")
@@ -88,12 +89,14 @@ class Carbon:
                     response = self.build_response(Response.HELO)
 
                 case 1:  # WRIT
-                    await self.db.execute("INSERT OR REPLACE INTO items VALUES (?, ?)", (key, value))
+                    await self.db.execute("REPLACE INTO items (key, value) VALUES (?, ?)", (key, value))
                     response = self.build_response(Response.OPOK)
 
                     # Propagate change to peers
                     for peer in session_peers:
                         peer.write(CarbonDB.build_transaction(Transaction.WRIT, key, value))
+
+                    await self.db.commit()
 
                 case 2:  # READ
                     async with self.db.execute("SELECT value FROM items WHERE key = ?", (key,)) as cursor:
@@ -108,6 +111,8 @@ class Carbon:
                     # Propagate change to peers
                     for peer in session_peers:
                         peer.write(CarbonDB.build_transaction(Transaction.WIPE, key))
+
+                    await self.db.commit()
 
                 case 4:  # AUTH
                     response = self.build_response(Response.FAIL, "Authentication not supported on this database.")
